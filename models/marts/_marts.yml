@@ -6,11 +6,21 @@ models:
     config:
       contract:
         enforced: true        # a changed column name or type fails the build
+
+    # Semantic layer (dbt 1.12 spec). An entity or dimension sits on the column
+    # it is built from. Simple metrics sit here, next to their model. Metrics
+    # built from other metrics live in _metrics.yml.
+    semantic_model:
+      enabled: true
+    agg_time_dimension: sold_at     # every metric below is dated by this column
     columns:
       - name: deal_id
         data_type: varchar
         description: "Primary key. Looker's primary_key depends on this being unique."
         data_tests: [unique, not_null]
+        entity:
+          type: primary
+          name: deal
       - name: dealer_id
         data_type: varchar
         description: "Winning dealer."
@@ -20,16 +30,26 @@ models:
               arguments:
                 to: ref('dim_dealers')
                 field: dealer_id
+        entity:
+          type: foreign
+          name: dealer
       - name: car
         data_type: varchar
       - name: region
         data_type: varchar
         description: "Seller's region, upper case."
+        dimension:
+          type: categorical
       - name: acquisition_channel
         data_type: varchar
         description: "Marketing channel that brought the deal in."
+        dimension:
+          type: categorical
       - name: sold_at
         data_type: timestamp
+        granularity: day
+        dimension:
+          type: time
       - name: final_price_gbp
         data_type: double
       - name: fee_gbp
@@ -48,6 +68,38 @@ models:
         data_type: bigint
       - name: top_bid_gbp
         data_type: double
+
+    metrics:
+      - name: deals
+        description: "How many cars were sold."
+        type: simple
+        agg: count
+        expr: deal_id
+      - name: gmv
+        description: "Total price of the cars sold, in pounds."
+        type: simple
+        agg: sum
+        expr: final_price_gbp
+      - name: fees
+        description: "Marketplace fees charged, in pounds."
+        type: simple
+        agg: sum
+        expr: fee_gbp
+      - name: refunds
+        description: "Fees paid back, in pounds."
+        type: simple
+        agg: sum
+        expr: refund_gbp
+      - name: net_revenue
+        description: "Fees minus refunds, in pounds."
+        type: simple
+        agg: sum
+        expr: net_revenue_gbp
+      - name: finance_deals
+        description: "How many deals were bought with finance."
+        type: simple
+        agg: sum_boolean
+        expr: is_finance
 
   - name: fct_bids
     description: "One row per bid. Incremental."
@@ -68,19 +120,67 @@ models:
 
   - name: fct_marketing_spend
     description: "One row per channel per month. Spend and leads."
+    semantic_model:
+      enabled: true
+    agg_time_dimension: spend_month
     columns:
       - name: spend_id
         description: "Primary key (channel plus month)."
         data_tests: [unique, not_null]
+        entity:
+          type: primary
+          name: spend
       - name: spend_gbp
         data_tests: [positive_value]
+      - name: channel
+        description: "Marketing channel, lower case."
+        dimension:
+          type: categorical
+      - name: spend_month
+        description: "First day of the month the money was spent in."
+        granularity: month
+        dimension:
+          type: time
+    metrics:
+      - name: marketing_spend
+        description: "Marketing spend, in pounds."
+        type: simple
+        agg: sum
+        expr: spend_gbp
+      - name: leads
+        description: "How many leads the marketing brought in."
+        type: simple
+        agg: sum
+        expr: leads
 
   - name: dim_dealers
     description: "One row per dealer, current state."
+    semantic_model:
+      enabled: true
     columns:
       - name: dealer_id
         description: "Primary key."
         data_tests: [unique, not_null]
+        entity:
+          type: primary
+          name: dealer
+      - name: region
+        description: "Region the dealer is based in, upper case."
+        dimension:
+          type: categorical
+      - name: plan
+        description: "Dealer's plan, gold or silver."
+        dimension:
+          type: categorical
+
+  # The calendar MetricFlow joins cumulative metrics and offsets to.
+  - name: time_spine_daily
+    description: "One row per day for the whole of 2026. Only the semantic layer uses it."
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        granularity: day
 
 # Looker isn't part of the dbt DAG, because dbt doesn't build it.
 # Exposures are labels that show what uses our models. They run nothing, but

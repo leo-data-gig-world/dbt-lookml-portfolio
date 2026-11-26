@@ -1,0 +1,56 @@
+version: 2
+
+# Metrics built from other metrics. A simple metric sits next to its model, in
+# _marts.yml. A metric that combines metrics lives here, at the top level.
+
+metrics:
+  # Ratios. Divide after summing, so they stay right at any grouping.
+  - name: refund_rate
+    description: "Share of fees that was refunded."
+    type: ratio
+    numerator: refunds
+    denominator: fees
+
+  - name: finance_share
+    description: "Share of deals bought with finance."
+    type: ratio
+    numerator: finance_deals
+    denominator: deals
+
+  - name: net_revenue_per_deal
+    description: "Net revenue per deal, in pounds."
+    type: ratio
+    numerator: net_revenue
+    denominator: deals
+
+  # Spend and deals share no entity, so this only lines up by time.
+  # Group by metric_time__month, not by deal or channel.
+  - name: cost_per_deal
+    description: "Marketing spend per deal, in pounds. Only meaningful by time."
+    type: ratio
+    numerator: marketing_spend
+    denominator: deals
+
+  # Cumulative. Both need the time spine model to find the days.
+  - name: net_revenue_mtd
+    description: "Net revenue since the start of the month, in pounds."
+    type: cumulative
+    input_metric: net_revenue
+    grain_to_date: month
+
+  - name: deals_rolling_7d
+    description: "Deals in the 7 days up to and including each day."
+    type: cumulative
+    input_metric: deals
+    window: 7 days
+
+  # Derived. The same metric twice, once shifted back a month.
+  - name: net_revenue_vs_last_month
+    description: "Net revenue minus net revenue a month earlier, in pounds."
+    type: derived
+    expr: net_revenue - net_revenue_last_month
+    input_metrics:
+      - name: net_revenue
+      - name: net_revenue
+        alias: net_revenue_last_month
+        offset_window: 1 month

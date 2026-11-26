@@ -226,8 +226,37 @@ Each of these was tested. Undo each change before the next one.
 | `marketing_performance.dashboard.lookml`: add `deals.total_revenue` | `check_lookml.py` fails: revenue is a finance field, not in the marketing model |
 | Add a row to `raw_bids.csv`, then `dbt seed` and `dbt run --select fct_bids` | Incremental picks it up, if it's within 3 days of the latest bid |
 | Change a dealer's `plan` and `updated_at`, then `dbt seed` and `dbt snapshot` | A second history row appears |
+| `_marts.yml`: change the `refunds` metric's `expr` to `fee_gbp` | `check_metrics.py` fails: refund rate no longer matches plain SQL |
 
 To rebuild from nothing: `dbt build --full-refresh`.
+
+---
+
+## 9b. Semantic layer (MetricFlow)
+
+Each metric is defined once, in YAML, and MetricFlow writes the SQL. The same metric in LookML lives in `lookml/`; here it lives in dbt, so any tool can ask for it.
+
+| File | What's in it |
+|---|---|
+| `models/marts/_marts.yml` | `semantic_model` on `fct_deals`, `fct_marketing_spend`, `dim_dealers`. Entities and dimensions on their columns. Simple metrics (`deals`, `fees`, `refunds`, `net_revenue`...) next to their model. |
+| `models/marts/_metrics.yml` | Metrics built from metrics: ratios (`refund_rate`, `finance_share`, `cost_per_deal`), cumulative (`net_revenue_mtd`, `deals_rolling_7d`), derived (`net_revenue_vs_last_month`). |
+| `models/marts/time_spine_daily.sql` | One row per day. MetricFlow needs it for cumulative and offset metrics. |
+| `scripts/check_metrics.py` | Compares MetricFlow's numbers with plain SQL. Fails on any difference. |
+
+```powershell
+$env:PYTHONUTF8 = "1"            # Windows only: mf's spinner crashes on the default console encoding
+mf validate-configs
+mf query --metrics deals,net_revenue,refund_rate --group-by metric_time__month
+mf query --metrics refund_rate,deals --group-by deal__region
+mf query --metrics finance_share --group-by dealer__plan
+python scripts/check_metrics.py
+```
+
+`deal__region` is the seller's region on the deal. `dealer__region` is the dealer's own region, reached through the `dealer` entity. Same word, two meanings, and the name says which.
+
+**Why ratios live here:** the refund rates by region are 0, 0 and 0.47. Their average is 0.157, but the real refund rate is 0.125, because one region has more fees than the others. A ratio metric sums refunds and fees first, then divides, so it's right at any grouping.
+
+MetricFlow reads `target/semantic_manifest.json`, which `dbt parse` (or any dbt run) writes. After editing metric YAML, run `dbt parse` before `mf query`, or you query the old definitions. `check_metrics.py` does this for you.
 
 ---
 

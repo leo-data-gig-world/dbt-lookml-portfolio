@@ -37,6 +37,14 @@ jobs:
       - name: Check LookML against dbt
         run: python scripts/check_lookml.py
 
+      # The semantic layer: YAML must be valid, and MetricFlow's numbers must
+      # match plain SQL. A wrongly defined metric fails the PR.
+      - name: Validate MetricFlow
+        run: mf validate-configs
+
+      - name: Check metrics against plain SQL
+        run: python scripts/check_metrics.py
+
 # Real projects use slim CI, so only what changed gets built:
 #
 #   - name: Download production manifest
